@@ -82,6 +82,9 @@ class DesktopClockApp:
         if is_already_running():
             sys.exit(0)
 
+        print("\n" + "="*40)
+        print(">>> Desktop Timezone Clock v1.0.0 Starting...")
+        
         self.config = load_config()
         
         # 同步開機啟動狀態與註冊表 (解決安裝時勾選自動啟動但設定頁未同步的問題)
@@ -112,7 +115,7 @@ class DesktopClockApp:
                 try:
                     fn()
                 except Exception as e:
-                    pass
+                    print(f"[ui] action error: {e}")
         except queue.Empty:
             pass
         root.after(50, self._drain_ui_actions)
