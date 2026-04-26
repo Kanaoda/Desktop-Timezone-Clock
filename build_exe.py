@@ -16,12 +16,17 @@ def build():
     # --name: 指定檔名
     # --add-data: 包含必要的檔案 (Windows 下格式為 "src;dest")
     
+    import customtkinter
+    ctk_path = os.path.dirname(customtkinter.__file__)
+    
     cmd = [
         "pyinstaller",
         "--noconsole",
         "--onefile",
         "--name=DesktopTimezoneClock",
         "--clean",
+        # 核心：包含 CustomTkinter 的資源檔 (json/txt)
+        f"--add-data={ctk_path};customtkinter/",
         "main.py"
     ]
     

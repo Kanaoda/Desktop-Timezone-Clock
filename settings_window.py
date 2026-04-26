@@ -20,11 +20,11 @@ CARD2   = "#232328"   # 輸入框 / 按鈕
 BORDER  = "#2E2E36"   # 邊線
 TEXT    = "#E8E8EE"   # 主文字
 SUB     = "#B8B8C2"   # 副文字（提高可讀性）
-MUTED   = "#8A8A96"   # 更淡（提高亮度，避免在深色背景看不清）
+MUTED   = "#888888"   # 提高亮度以確保在深色背景可見
 SEL_BG  = "#2C2C34"   # 選中行背景
 HOVER   = "#252530"   # hover
-SW_ON   = "#1FE0BF"   # 開啟：青綠（參考圖）
-SW_OFF  = "#2B2B33"   # 關閉：深灰
+SW_ON   = "#00BFA5"   # 開啟：亮青綠
+SW_OFF  = "#4D4D54"   # 關閉：中灰（提高對比度）
 
 GITHUB_SPONSOR_URL = "https://github.com/sponsors/Kanaoda"
 BUY_ME_A_COFFEE_URL = "https://www.buymeacoffee.com/kanaoda"
@@ -229,6 +229,7 @@ class _TechToggle(ctk.CTkFrame):
     def _render(self):
         is_on = bool(self._var.get())
         self._track.configure(fg_color=SW_ON if is_on else SW_OFF)
+        self._knob.configure(fg_color="#FFFFFF" if is_on else "#AAAAAA")
         self._knob.place(x=18 if is_on else 2, y=2)
 
     def _toggle(self, _event=None):
@@ -342,9 +343,9 @@ class SettingsWindow:
         # ── 預覽 ──────────────────────────────────────────────────────────────
         _SectionLabel(scroll, self.i18n.get("preview"))
         pv = _Card(scroll)
-        pv_inner = ctk.CTkFrame(pv, fg_color=CARD, corner_radius=10)
-        pv_inner.pack(fill="x", padx=0, pady=0)
-        info = ctk.CTkFrame(pv_inner, fg_color=CARD, corner_radius=0)
+        self.preview_frame = ctk.CTkFrame(pv, fg_color=CARD, corner_radius=10)
+        self.preview_frame.pack(fill="x", padx=0, pady=0)
+        info = ctk.CTkFrame(self.preview_frame, fg_color="transparent", corner_radius=0)
         info.pack(fill="x", padx=16, pady=14)
 
         self.local_time_label = ctk.CTkLabel(
@@ -352,10 +353,11 @@ class SettingsWindow:
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"))
         self.local_time_label.pack(anchor="w")
 
-        self.target_time_label = ctk.CTkLabel(
+        self.preview_clock = ctk.CTkLabel(
             info, text="", text_color=TEXT, anchor="w",
             font=ctk.CTkFont(family="Segoe UI Semibold", size=28, weight="bold"))
-        self.target_time_label.pack(anchor="w", pady=(2, 0))
+        self.preview_clock.pack(anchor="w", pady=(2, 0))
+        self.target_time_label = self.preview_clock
 
         self.target_tz_label = ctk.CTkLabel(
             info, text="", text_color=TEXT, anchor="w",
@@ -413,8 +415,8 @@ class SettingsWindow:
             command=self._on_seg_lang,
             width=100, height=26,
             fg_color=CARD2,
-            selected_color=SEL_BG,
-            selected_hover_color=HOVER,
+            selected_color=SW_ON,
+            selected_hover_color=SW_ON,
             unselected_color=CARD2,
             unselected_hover_color=HOVER,
             text_color=TEXT,
@@ -452,18 +454,14 @@ class SettingsWindow:
         r_fc = _Row(ab, self.i18n.get("font_color_row"))
         self._build_color_row(
             r_fc.right, self.font_color_mode, self.font_color_value,
-            lambda: self._pick_color(self.font_color_value,
-                                     self.font_color_mode,
-                                     self.i18n.get("choose_font_color")))
+            self._pick_font_color, is_bg=False)
         _Sep(ab)
 
         # 背景顏色
         r_bc = _Row(ab, self.i18n.get("bg_color_row"))
         self._build_color_row(
             r_bc.right, self.bg_color_mode, self.bg_color_value,
-            lambda: self._pick_color(self.bg_color_value,
-                                     self.bg_color_mode,
-                                     self.i18n.get("choose_bg_color")))
+            self._pick_bg_color, is_bg=True)
 
         # ── 系統 ──────────────────────────────────────────────────────────────
         _SectionLabel(scroll, self.i18n.get("system_section"))
@@ -531,47 +529,65 @@ class SettingsWindow:
             v.trace_add("write", lambda *_: self._fire_preview())
 
     # ── 顏色選色列 ─────────────────────────────────────────────────────────────
-    def _build_color_row(self, parent, mode_var, value_var, pick_cb):
-        lbl_auto   = self.i18n.get("color_auto")
-        lbl_custom = self.i18n.get("color_custom")
-        wrap = ctk.CTkFrame(parent, fg_color=CARD, corner_radius=0)
-        wrap.pack()
+    def _build_color_row(self, parent, mode_var, value_var, pick_cb, is_bg=False):
+        # 增加圖標，強化「自動 / 手動」的視覺區別
+        lbl_auto   = "⚡ " + self.i18n.get("color_auto")
+        lbl_custom = "🎨 " + self.i18n.get("color_custom")
+
+        # 使用 transparent 背景確保對齊
+        wrap = ctk.CTkFrame(parent, fg_color="transparent", corner_radius=0)
+        wrap.pack(side="right")
+
         seg = ctk.CTkSegmentedButton(
             wrap, values=[lbl_auto, lbl_custom],
             command=lambda v: (
                 mode_var.set("system" if v == lbl_auto else "custom"),
                 self._fire_preview()),
-            width=100, height=26,
+            width=140, height=28,
             fg_color=CARD2,
-            selected_color=SEL_BG,
-            selected_hover_color=HOVER,
+            selected_color=SW_ON,
+            selected_hover_color="#00A892",
             unselected_color=CARD2,
             unselected_hover_color=HOVER,
             text_color=TEXT,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
         )
-        seg.pack(side="left")
-        seg.set(lbl_auto if mode_var.get() == "system" else lbl_custom)
-        mode_var.trace_add("write",
-            lambda *_: seg.set(lbl_auto if mode_var.get() == "system" else lbl_custom))
+        seg.pack(side="left", padx=(0, 8))
+
+        def _get_lbl():
+            return lbl_auto if mode_var.get() == "system" else lbl_custom
+
+        seg.set(_get_lbl())
+        mode_var.trace_add("write", lambda *_: seg.set(_get_lbl()))
 
         dot = ctk.CTkButton(
-            wrap, text="", width=22, height=22, corner_radius=3,
+            wrap, text="", width=24, height=24, corner_radius=4,
             fg_color=CARD2, hover_color=HOVER,
             border_width=1, border_color=BORDER,
             command=pick_cb,
         )
-        dot.pack(side="left", padx=(8, 0))
+        dot.pack(side="left")
 
         def _sync(*_):
-            c = value_var.get()
-            dot.configure(
-                fg_color=(c if mode_var.get() == "custom"
-                          and isinstance(c, str) and c.startswith("#")
-                          else CARD2))
+            from utils import sample_taskbar_color, get_system_theme
+            mode = mode_var.get()
+            if mode == "custom":
+                c = value_var.get()
+                dot.configure(fg_color=c if isinstance(c, str) and c.startswith("#") else CARD2)
+            else:
+                # 自動模式下，反映真實獲取的顏色
+                if is_bg:
+                    sampled = sample_taskbar_color()
+                    dot.configure(fg_color=sampled if sampled else CARD2)
+                else:
+                    fg, _ = get_system_theme()
+                    dot.configure(fg_color=fg if fg else TEXT)
+                    
         value_var.trace_add("write", _sync)
         mode_var.trace_add("write",  _sync)
         _sync()
+        # 定期刷新自動模式的色塊
+        parent.after(5000, _sync)
 
     def _on_tz_change(self, _event=None):
         self._update_target_time()
@@ -622,6 +638,13 @@ class SettingsWindow:
 
         self._update_target_time()
         self._fire_preview()
+
+    # ── 內部邏輯與事件 ───────────────────────────────────────────────────────────
+    def _pick_font_color(self):
+        self._pick_color(self.font_color_value, self.font_color_mode, self.i18n.get("choose_font_color"))
+
+    def _pick_bg_color(self):
+        self._pick_color(self.bg_color_value, self.bg_color_mode, self.i18n.get("choose_bg_color"))
 
     def _pick_color(self, value_var, mode_var, title=""):
         mode_var.set("custom")
@@ -685,14 +708,58 @@ class SettingsWindow:
         }
 
     def _fire_preview(self, *_):
-        if self.on_preview is None or self._closed:
+        if self._closed:
             return
-        try:
-            tmp = copy.deepcopy(self.config)
-            tmp["clocks"][self.clock_idx] = self._get_current_clock_cfg()
-            self.on_preview(tmp)
-        except Exception:
-            pass
+
+        # 1. 更新主程式預覽 (Overlay Window)
+        if self.on_preview:
+            try:
+                tmp = copy.deepcopy(self.config)
+                tmp["clocks"][self.clock_idx] = self._get_current_clock_cfg()
+                self.on_preview(tmp)
+            except Exception:
+                pass
+
+        # 2. 更新設定視窗內部的「預覽時鐘」樣式
+        from utils import sample_taskbar_color, get_system_theme
+        
+        # 決定背景色
+        if self.bg_color_mode.get() == "system":
+            bg = sample_taskbar_color()
+        else:
+            bg = self.bg_color_value.get()
+        
+        # 決定文字色
+        if self.font_color_mode.get() == "system":
+            fg, _ = get_system_theme()
+        else:
+            fg = self.font_color_value.get()
+
+        # 套用到預覽元件
+        if hasattr(self, 'target_time_label'):
+            self.target_time_label.configure(text_color=fg)
+        if hasattr(self, 'local_time_label'):
+            self.local_time_label.configure(text_color=fg)
+        if hasattr(self, 'target_tz_label'):
+            self.target_tz_label.configure(text_color=fg)
+            
+        if hasattr(self, 'preview_frame'):
+            # 視覺修正：當背景非常亮時，加上邊框以避免「視覺黑洞/白洞」感
+            is_very_light = False
+            if bg and bg.startswith("#"):
+                try:
+                    r = int(bg[1:3], 16)
+                    g = int(bg[3:5], 16)
+                    b = int(bg[5:7], 16)
+                    if (r*0.299 + g*0.587 + b*0.114) > 200:
+                        is_very_light = True
+                except: pass
+
+            self.preview_frame.configure(
+                fg_color=bg if bg else CARD,
+                border_width=1 if is_very_light else 0,
+                border_color="#444444"
+            )
 
     def _save(self):
         self.config["language"]  = self.lang_var.get()

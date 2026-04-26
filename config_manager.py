@@ -1,6 +1,7 @@
 import json
 import os
 import copy
+import sys
 
 DEFAULT_CLOCK_CONFIG = {
     "target_timezone": "Asia/Hong_Kong",
@@ -9,8 +10,8 @@ DEFAULT_CLOCK_CONFIG = {
     "font_color": "system",
     "bg_color": "system",
     "show_date": True,
-    "time_format": "%p %I:%M",
-    "date_format": "%Y/%m/%d",
+    "time_format": "%#I:%M %p",
+    "date_format": "%#d/%#m/%Y",
     "position": "overlay_taskbar" # overlay_taskbar or custom
 }
 
@@ -21,7 +22,17 @@ DEFAULT_CONFIG = {
     "version": "1.0.0"
 }
 
-CONFIG_FILE = "config.json"
+def get_app_base_path():
+    """取得應用程式根目錄，相容於腳本執行與 PyInstaller 打包後的 EXE"""
+    if getattr(sys, 'frozen', False):
+        # 如果是打包後的 EXE
+        return os.path.dirname(sys.executable)
+    else:
+        # 如果是腳本執行
+        return os.path.dirname(os.path.abspath(__file__))
+
+# 鎖定絕對路徑，防止開機自啟動時工作目錄 (CWD) 偏移導致找不到設定
+CONFIG_FILE = os.path.join(get_app_base_path(), "config.json")
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
