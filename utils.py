@@ -12,18 +12,12 @@ APP_NAME = "DesktopTimezoneClock"
 _mutex = None
 
 def is_already_running():
-    """
-    使用非繼承性 Mutex 防止重複啟動。
-    若 Mutex 已存在（例如 shell 父進程殘留句柄），以視窗偵測做二次確認。
-    """
     global _mutex
     sa = win32security.SECURITY_ATTRIBUTES()
-    sa.bInheritHandle = 0  # 非繼承，避免 shell 父進程殘留句柄
+    sa.bInheritHandle = 0
     _mutex = win32event.CreateMutex(sa, False, f"Global\\{APP_NAME}_Mutex")
     if win32api.GetLastError() != winerror.ERROR_ALREADY_EXISTS:
         return False
-
-    # Mutex 已存在 → 用視窗二次確認：看 TrayClockWClass 有無子視窗（我們的 overlay）
     try:
         import win32process
         our_pid = os.getpid()
@@ -40,102 +34,124 @@ def is_already_running():
                 return True
             win32gui.EnumChildWindows(clock_wnd, _cb, children)
             if children:
-                return True   # 確實有另一實例的視窗在工作列
+                return True
     except Exception:
         pass
-    # Mutex 是殘留句柄，允許啟動
     return False
 
 def _get_dwm_accent_hex():
-    """
-    讀取 Windows DWM 輔色（accent color）並轉為 #RRGGBB。
-    ColorizationColor 的格式為 0xAARRGGBB。
-    """
+    # 嘗試從 Windows 註冊表獲取 DWM 顏色 (ARGB 格式)
     try:
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                             r"Software\Microsoft\Windows\DWM")
+        import winreg
+        # DWM 顏色通常比 StartColorMenu 更接近視覺上的工作列顏色
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\DWM")
         val, _ = winreg.QueryValueEx(key, "ColorizationColor")
-        winreg.CloseKey(key)
-        r = (val >> 16) & 0xFF
-        g = (val >> 8)  & 0xFF
-        b =  val        & 0xFF
-        return f"#{r:02x}{g:02x}{b:02x}"
+        # val 是 0xAABBGGRR 或 0AARRGGBB，視版本而定。
+        # 通常 DWM 會把 Accent 色與 Taskbar 混合。
+        # 我們取後 6 位作為基礎
+        color_hex = f"#{val & 0xFFFFFF:06x}"
+        return color_hex
     except Exception:
         return None
 
+_taskbar_color_cache = {"color": None, "expiry": 0}
 
 def sample_taskbar_color():
-    """
-    採樣工作列實際像素色（已包含 DWM 模糊/壓深的最終視覺效果），
-    避免 overlay 跟工作列顏色不一致。
+    """採樣工作列背景顏色（使用眾數法，優先採樣時鐘週邊區域）。增加快取以優化效能。"""
+    global _taskbar_color_cache
+    import time
+    now = time.time()
+    if _taskbar_color_cache["color"] and now < _taskbar_color_cache["expiry"]:
+        return _taskbar_color_cache["color"]
 
-    為避免採到 overlay 自己的像素，採樣位置選在工作列「左下角內側」
-    （遠離右側 TrayClock 區域）。
-
-    回傳 #RRGGBB；失敗時回傳 None。
-    """
     try:
+        # 1. 優先嘗試從註冊表獲取 DWM 核心顏色（最準確的主題色基礎）
+        import win32gui, win32api
+        
+        # 1. 定位工作列與時鐘
         shell_tray = win32gui.FindWindow("Shell_TrayWnd", None)
-        if not shell_tray:
-            return None
-
-        left, top, right, bottom = win32gui.GetWindowRect(shell_tray)
-        # 工作列方向偵測（橫向 / 直向）
-        w = right - left
-        h = bottom - top
-
-        if w >= h:
-            # 橫向工作列：採樣左邊偏中段，避開「開始」按鈕本身的色塊
-            sx = left + min(160, w // 4)
-            sy = top + h // 2
-        else:
-            # 直向工作列：採樣上方
-            sx = left + w // 2
-            sy = top + min(160, h // 4)
-
-        screen_dc = win32gui.GetDC(0)
-        try:
-            pixel = win32gui.GetPixel(screen_dc, sx, sy)
-        finally:
-            win32gui.ReleaseDC(0, screen_dc)
-
-        if pixel < 0:
-            return None
-
-        r =  pixel        & 0xFF
-        g = (pixel >> 8)  & 0xFF
-        b = (pixel >> 16) & 0xFF
-        return f"#{r:02x}{g:02x}{b:02x}"
+        target_wnd = 0
+        if shell_tray:
+            tray_notify = win32gui.FindWindowEx(shell_tray, 0, "TrayNotifyWnd", None)
+            if tray_notify:
+                target_wnd = win32gui.FindWindowEx(tray_notify, 0, "TrayClockWClass", None)
+        
+        if not target_wnd: target_wnd = shell_tray
+        if not target_wnd: return "#202020"
+            
+        rect = win32gui.GetWindowRect(target_wnd)
+        hdc = win32gui.GetDC(0)
+        
+        # 2. 多點採樣 (避開邊界與文字中心)
+        # 由於已開啟 DPI Awareness，這裡獲得的座標與 GetPixel 要求的物理像素一致
+        sample_points = [
+            (rect[0] - 10, (rect[1] + rect[3]) // 2),  # 時鐘左側中心
+            (rect[0] - 5,  rect[1] + 5),               # 左上
+            (rect[0] - 15, rect[3] - 5),               # 左下
+            (rect[0] - 25, (rect[1] + rect[3]) // 2),  # 更左側
+        ]
+        
+        from collections import Counter
+        colors = []
+        for x, y in sample_points:
+            try:
+                # 確保座標在主螢幕範圍內
+                p = win32gui.GetPixel(hdc, x, y)
+                if p != -1:
+                    colors.append(((p & 0xff), (p >> 8) & 0xff, (p >> 16) & 0xff))
+            except: continue
+        
+        win32gui.ReleaseDC(0, hdc)
+        
+        if not colors: return "#202020"
+        
+        # 取眾數
+        most_common = Counter(colors).most_common(1)
+        r, g, b = most_common[0][0]
+        color_hex = f"#{r:02x}{g:02x}{b:02x}"
+        
+        _taskbar_color_cache = {"color": color_hex, "expiry": now + 5}
+        return color_hex
+        
     except Exception:
-        return None
+        return "#202020"
 
+def sample_pixel(x, y):
+    """採樣指定螢幕座標的物理像素顏色。"""
+    try:
+        hdc = win32gui.GetDC(0)
+        p = win32gui.GetPixel(hdc, int(x), int(y))
+        win32gui.ReleaseDC(0, hdc)
+        if p == -1: return "#000000"
+        return f"#{p & 0xff:02x}{(p >> 8) & 0xff:02x}{(p >> 16) & 0xff:02x}"
+    except Exception:
+        return "#000000"
+
+def get_color_brightness(hex_color: str) -> float:
+    """計算 HEX 顏色的亮度 (0-255)。"""
+    if not hex_color or not hex_color.startswith("#") or len(hex_color) != 7:
+        return 0
+    try:
+        r = int(hex_color[1:3], 16)
+        g = int(hex_color[3:5], 16)
+        b = int(hex_color[5:7], 16)
+        return (r * 299 + g * 587 + b * 114) / 1000
+    except ValueError:
+        return 0
 
 def get_system_theme():
-    """
-    取得工作列的前景色與背景色（用於 overlay 顯示）。
-    返回: (fg_color, bg_color)，皆為 #RRGGBB 或具名色。
-
-    優先順序：
-      1. 直接採樣工作列實際像素色（最準，已含 DWM 後製）。
-      2. ColorPrevalence=1 → DWM 輔色。
-      3. 深/淺色主題 fallback。
-    """
     sampled = sample_taskbar_color()
     if sampled:
-        r = int(sampled[1:3], 16)
-        g = int(sampled[3:5], 16)
-        b = int(sampled[5:7], 16)
-        brightness = (r * 299 + g * 587 + b * 114) / 1000
+        brightness = get_color_brightness(sampled)
         fg = "black" if brightness > 140 else "white"
         return fg, sampled
 
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
     try:
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path)
-        system_light, _    = winreg.QueryValueEx(key, "SystemUsesLightTheme")
+        system_light, _ = winreg.QueryValueEx(key, "SystemUsesLightTheme")
         color_prevalence, _ = winreg.QueryValueEx(key, "ColorPrevalence")
         winreg.CloseKey(key)
-
         if color_prevalence == 1:
             accent = _get_dwm_accent_hex()
             if accent:
@@ -145,97 +161,62 @@ def get_system_theme():
                 brightness = (r * 299 + g * 587 + b * 114) / 1000
                 fg = "black" if brightness > 140 else "white"
                 return fg, accent
-
-        if system_light == 0:
-            return "white", "#000000"
-        else:
-            return "black", "#FFFFFF"
+        return ("white", "#000000") if system_light == 0 else ("black", "#FFFFFF")
     except Exception:
         return "white", "#000000"
 
 def _find_tray_clock_window():
     shell_tray = win32gui.FindWindow("Shell_TrayWnd", None)
-    if not shell_tray:
-        return 0
-
+    if not shell_tray: return 0
     tray_notify = win32gui.FindWindowEx(shell_tray, 0, "TrayNotifyWnd", None)
     if tray_notify:
         clock_wnd = win32gui.FindWindowEx(tray_notify, 0, "TrayClockWClass", None)
-        if clock_wnd:
-            return clock_wnd
-
+        if clock_wnd: return clock_wnd
     clocks = []
     def find_clock(hwnd, acc):
         try:
-            if win32gui.GetClassName(hwnd) == "TrayClockWClass":
-                acc.append(hwnd)
-        except Exception:
-            pass
+            if win32gui.GetClassName(hwnd) == "TrayClockWClass": acc.append(hwnd)
+        except Exception: pass
         return True
     win32gui.EnumChildWindows(shell_tray, find_clock, clocks)
-    if clocks:
-        return clocks[0]
-
+    if clocks: return clocks[0]
     win32gui.EnumWindows(find_clock, clocks)
     return clocks[0] if clocks else 0
 
 def _make_lparam(x, y):
     return ((y & 0xFFFF) << 16) | (x & 0xFFFF)
 
-
 def trigger_win_calendar():
-    """
-    用 PostMessage 把點擊訊息直接送進 TrayClockWClass 的訊息佇列，
-    完全繞過 overlay 的 Z 序，不移動游標。
-    若找不到時鐘視窗，退回 Win + N。
-    """
     try:
         clock_wnd = _find_tray_clock_window()
         if clock_wnd:
             left, top, right, bottom = win32gui.GetWindowRect(clock_wnd)
-            cx = (right - left) // 2
-            cy = (bottom - top) // 2
+            cx, cy = (right - left) // 2, (bottom - top) // 2
             lp = _make_lparam(cx, cy)
-            win32gui.PostMessage(
-                clock_wnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lp)
-            win32gui.PostMessage(
-                clock_wnd, win32con.WM_LBUTTONUP, 0, lp)
+            win32gui.PostMessage(clock_wnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lp)
+            win32gui.PostMessage(clock_wnd, win32con.WM_LBUTTONUP, 0, lp)
             return
-
-        # fallback: Win + N (Win11 通知中心熱鍵)
         win32api.keybd_event(win32con.VK_LWIN, 0, 0, 0)
         win32api.keybd_event(ord("N"), 0, 0, 0)
         win32api.keybd_event(ord("N"), 0, win32con.KEYEVENTF_KEYUP, 0)
         win32api.keybd_event(win32con.VK_LWIN, 0, win32con.KEYEVENTF_KEYUP, 0)
-    except Exception as e:
-        print(f"Error triggering calendar: {e}")
+    except Exception: pass
 
 def set_autostart(enabled):
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
     try:
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
         if enabled:
-            # 獲取目前的 python 執行路徑和腳本路徑
             executable = sys.executable
             script_path = os.path.abspath(sys.argv[0])
-            # 如果是腳本執行，需要 python.exe + script_path
-            # 如果是打包後的 exe，只需要 script_path
-            if script_path.endswith(".py"):
-                cmd = f'"{executable}" "{script_path}"'
-            else:
-                cmd = f'"{script_path}"'
-            
+            cmd = f'"{executable}" "{script_path}"' if script_path.endswith(".py") else f'"{script_path}"'
             winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, cmd)
         else:
-            try:
-                winreg.DeleteValue(key, APP_NAME)
-            except FileNotFoundError:
-                pass
+            try: winreg.DeleteValue(key, APP_NAME)
+            except FileNotFoundError: pass
         winreg.CloseKey(key)
         return True
-    except Exception as e:
-        print(f"Error setting autostart: {e}")
-        return False
+    except Exception: return False
 
 def is_autostart_enabled():
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -244,10 +225,7 @@ def is_autostart_enabled():
         try:
             winreg.QueryValueEx(key, APP_NAME)
             enabled = True
-        except FileNotFoundError:
-            enabled = False
+        except FileNotFoundError: enabled = False
         winreg.CloseKey(key)
         return enabled
-    except Exception as e:
-        print(f"Error checking autostart: {e}")
-        return False
+    except Exception: return False

@@ -8,13 +8,24 @@ from pystray._util import win32 as tray_win32
 import win32con
 from PIL import Image, ImageDraw
 import sys
+import ctypes
+
+try:
+    # Set DPI awareness (Per Monitor V2 is preferred if available)
+    # 2 = PROCESS_PER_MONITOR_DPI_AWARE
+    ctypes.windll.shcore.SetProcessDpiAwareness(1)
+except Exception:
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
 
 from config_manager import load_config, save_config
 from overlay_window import ClockOverlay
 from settings_window import SettingsWindow
 
 from i18n import I18n
-from utils import is_already_running
+from utils import is_already_running, is_autostart_enabled
 
 
 class DesktopTrayIcon(pystray_win32.Icon):
@@ -47,14 +58,11 @@ class DesktopTrayIcon(pystray_win32.Icon):
             self._on_double_left_click(self)
 
     def _on_notify(self, wparam, lparam):
-        print(f"[tray] notify lparam={lparam}")
         # Windows 可能送 WM_LBUTTONDBLCLK，也可能只送兩次 WM_LBUTTONUP，兩者都處理
         if lparam == self._WM_LBUTTONDBLCLK:
-            print("[tray] WM_LBUTTONDBLCLK")
             self._fire_double_click()
             return
         if lparam == tray_win32.WM_LBUTTONUP:
-            print("[tray] WM_LBUTTONUP")
             now = time.time()
             if now - self._last_left_up_ts <= self._DBLCLICK_SEC:
                 self._last_left_up_ts = 0.0
@@ -75,6 +83,16 @@ class DesktopClockApp:
             sys.exit(0)
 
         self.config = load_config()
+        
+        # 同步開機啟動狀態與註冊表 (解決安裝時勾選自動啟動但設定頁未同步的問題)
+        try:
+            from utils import is_autostart_enabled
+            registry_enabled = is_autostart_enabled()
+            if self.config.get("autostart") != registry_enabled:
+                self.config["autostart"] = registry_enabled
+                save_config(self.config)
+        except Exception:
+            pass
         self.overlays = []
         self.tray_icon = None
         self._settings_win = None
@@ -94,7 +112,7 @@ class DesktopClockApp:
                 try:
                     fn()
                 except Exception as e:
-                    print(f"[ui] action error: {e}")
+                    pass
         except queue.Empty:
             pass
         root.after(50, self._drain_ui_actions)
@@ -173,20 +191,19 @@ class DesktopClockApp:
     #  TRAY                                                                #
     # ------------------------------------------------------------------ #
 
-    def on_exit(self, icon, item):
+    def on_exit(self, icon, item=None):
         icon.stop()
         for overlay in self.overlays:
             overlay.root.after(0, overlay.close)
-        sys.exit(0)
+        import os
+        os._exit(0)
 
     def _on_tray_single_click(self, icon):
         if self.overlays:
-            print("[tray] single-click callback")
             self._post_ui_action(lambda: self.overlays[0].toggle_calendar())
 
     def _on_tray_double_click(self, icon):
         if self.overlays:
-            print("[tray] double-click callback")
             self._post_ui_action(self._open_settings_window)
 
     def run_tray(self):

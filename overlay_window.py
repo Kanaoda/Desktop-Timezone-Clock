@@ -248,6 +248,11 @@ class ClockOverlay:
         if v in ("system", "auto", None, ""):
             sampled = sample_taskbar_color()
             if sampled:
+                # 這裡更新 sys_bg 和 sys_fg，確保字體顏色能即時跟隨背景採樣更新
+                self.sys_bg = sampled
+                from utils import get_color_brightness
+                brightness = get_color_brightness(sampled)
+                self.sys_fg = "black" if brightness > 140 else "white"
                 return sampled
             return self.sys_bg if isinstance(self.sys_bg, str) and self.sys_bg.startswith(
                 "#") else "#000000"
@@ -291,7 +296,7 @@ class ClockOverlay:
                 except Exception:
                     pass
                 self._single_click_job = None
-            print("[overlay] double-click → open settings")
+            # print("[overlay] double-click → open settings")
             if callable(self.on_open_settings):
                 self.root.after(0, self.on_open_settings)
         else:
@@ -307,7 +312,7 @@ class ClockOverlay:
 
     def _do_single_click(self):
         self._single_click_job = None
-        print("[overlay] single click → toggle calendar")
+        # print("[overlay] single click → toggle calendar")
         self.toggle_calendar()
 
     def toggle_calendar(self):
