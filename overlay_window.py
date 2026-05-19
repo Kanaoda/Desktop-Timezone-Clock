@@ -89,8 +89,10 @@ class ClockOverlay:
         fg = self._resolve_font_color()
         print(f"[overlay] init  bg={bg}  fg={fg}  tz={self.config.get('target_timezone')}")
 
+        self.root.geometry("1x1-10000-10000")  # 初始將視窗定位於極遠的螢幕外，避免在 (0,0) 處短暫映射
         self.root.overrideredirect(True)
-        self.root.attributes("-topmost", True)
+        # 移除起始的 -topmost 屬性，避免 DWM 在 (0,0) 留下置頂點擊穿透與攔截陰影。
+        # 置頂狀態將僅在 fallback（非嵌入模式）中透過 Win32 HWND_TOPMOST 或 attributes("-topmost") 啟用。
         self.root.config(bg=bg, borderwidth=0, highlightthickness=0)
 
         self.label = tk.Label(
@@ -177,6 +179,10 @@ class ClockOverlay:
 
     def _topmost_fallback(self):
         """找不到 TrayClockWClass 時的備用方案：覆蓋在畫面右下角。"""
+        try:
+            self.root.attributes("-topmost", True)  # 啟用置頂屬性
+        except Exception:
+            pass
         sw = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
         sh = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
         self.root.geometry(f"100x40+{sw - 110}+{sh - 50}")

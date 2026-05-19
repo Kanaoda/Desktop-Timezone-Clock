@@ -11,14 +11,24 @@ import sys
 import ctypes
 
 try:
-    # Set DPI awareness (Per Monitor V2 is preferred if available)
-    # 2 = PROCESS_PER_MONITOR_DPI_AWARE
-    ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    # 優先嘗試 Windows 10 1703+ 的 Per-Monitor V2 DPI awareness
+    # -4 代表 DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+    ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
 except Exception:
     try:
-        ctypes.windll.user32.SetProcessDPIAware()
+        # 嘗試 Windows 8.1+ 的 Per-Monitor DPI awareness
+        # 2 代表 PROCESS_PER_MONITOR_DPI_AWARE
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
     except Exception:
-        pass
+        try:
+            # 備用為 System DPI awareness
+            # 1 代表 PROCESS_SYSTEM_DPI_AWARE
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
 
 from config_manager import load_config, save_config
 from overlay_window import ClockOverlay
