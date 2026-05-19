@@ -19,7 +19,7 @@ DEFAULT_CONFIG = {
     "clocks": [DEFAULT_CLOCK_CONFIG],
     "autostart": False,
     "language": "zh",
-    "version": "1.0.0"
+    "version": "1.0.1"
 }
 
 def get_app_base_path():
