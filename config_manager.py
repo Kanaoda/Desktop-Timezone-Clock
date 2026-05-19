@@ -31,8 +31,30 @@ def get_app_base_path():
         # 如果是腳本執行
         return os.path.dirname(os.path.abspath(__file__))
 
-# 鎖定絕對路徑，防止開機自啟動時工作目錄 (CWD) 偏移導致找不到設定
-CONFIG_FILE = os.path.join(get_app_base_path(), "config.json")
+def get_config_file_path():
+    """取得設定檔的絕對路徑。優先使用 %APPDATA%（解決安裝在 Program Files 時的無寫入權限問題），並自動從舊路徑遷移。"""
+    app_dir_config = os.path.join(get_app_base_path(), "config.json")
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        config_dir = os.path.join(appdata, "DesktopTimezoneClock")
+        try:
+            os.makedirs(config_dir, exist_ok=True)
+            appdata_config = os.path.join(config_dir, "config.json")
+            # 自動遷移：如果 APPDATA 內沒有設定檔，但應用程式根目錄下有舊設定檔，則將其複製過去
+            if not os.path.exists(appdata_config) and os.path.exists(app_dir_config):
+                try:
+                    import shutil
+                    shutil.copy2(app_dir_config, appdata_config)
+                    print(f"[config] Migrated config from {app_dir_config} to {appdata_config}")
+                except Exception as e:
+                    print(f"[config] Migration failed: {e}")
+            return appdata_config
+        except Exception:
+            pass
+    return app_dir_config
+
+# 鎖定設定檔絕對路徑，防範開機自啟動時 CWD 偏移
+CONFIG_FILE = get_config_file_path()
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
