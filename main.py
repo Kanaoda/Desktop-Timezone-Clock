@@ -93,7 +93,7 @@ class DesktopClockApp:
             sys.exit(0)
 
         print("\n" + "="*40)
-        print(">>> Desktop Timezone Clock v1.0.0 Starting...")
+        print(">>> Desktop Timezone Clock v1.0.1 Starting...")
         
         self.config = load_config()
         
