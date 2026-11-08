@@ -60,6 +60,7 @@
 如果你覺得這個工具對你有幫助，歡迎支持我的持續開發：
 - **GitHub Sponsors**: [https://github.com/sponsors/Kanaoda](https://github.com/sponsors/Kanaoda)
 - **Buy Me a Coffee**: [https://buymeacoffee.com/kanaoda](https://buymeacoffee.com/kanaoda)
+- **PayMe**: [https://payme.hsbc/kanaoda](https://payme.hsbc/kanaoda)
 
 **作者**: Kanaoda  
 **版權**: © 2026 Kanaoda. Licensed under the MIT License.
@@ -122,6 +123,7 @@ Installer behavior (`installer.iss`):
 If you find this tool useful, feel free to support my work:
 - **GitHub Sponsors**: [https://github.com/sponsors/Kanaoda](https://github.com/sponsors/Kanaoda)
 - **Buy Me a Coffee**: [https://buymeacoffee.com/kanaoda](https://buymeacoffee.com/kanaoda)
+- **PayMe**: [https://payme.hsbc/kanaoda](https://payme.hsbc/kanaoda)
 
 **Author**: Kanaoda  
 **Copyright**: © 2026 Kanaoda. Licensed under the MIT License.
